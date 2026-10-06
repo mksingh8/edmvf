@@ -211,6 +211,38 @@ def test_validate_scenario_rejects_empty_key_fields():
         validate_scenario(scenario)
 
 
+def test_fr002_preserves_source_and_target_identities_in_loaded_scenario(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+name: csv_source_target_identity
+version: 1
+source:
+  type: csv
+  path: ./data/source.csv
+target:
+  type: csv
+  path: ./data/target.csv
+matching:
+  keys:
+    - id
+validation:
+  checks:
+    - missing_records
+output:
+  directory: ./output
+""".strip(),
+    )
+
+    scenario = load_config(config_path)
+
+    assert scenario.source.type == "csv"
+    assert scenario.target.type == "csv"
+    assert scenario.source.path == "./data/source.csv"
+    assert scenario.target.path == "./data/target.csv"
+    assert scenario.source != scenario.target
+
+
 def test_two_valid_yaml_scenarios_load_as_distinct_scenario_models(tmp_path):
     first_payload = {
         "name": "first_valid_scenario",
