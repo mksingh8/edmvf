@@ -243,6 +243,85 @@ output:
     assert scenario.source != scenario.target
 
 
+def test_fr003_supported_checks_can_be_defined_through_yaml(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        """
+name: csv_supported_checks
+version: 1
+source:
+  type: csv
+  path: ./data/source.csv
+target:
+  type: csv
+  path: ./data/target.csv
+matching:
+  keys:
+    - id
+validation:
+  checks:
+    - missing_records
+    - duplicate_records
+output:
+  directory: ./output
+""".strip(),
+    )
+
+    scenario = load_config(config_path)
+
+    assert scenario.validation.checks == ["missing_records", "duplicate_records"]
+
+
+def test_fr003_empty_validation_checks_are_rejected(tmp_path):
+    config_path = _write_yaml_config(
+        tmp_path,
+        {
+            "name": "empty_validation_checks",
+            "version": 1,
+            "source": {"type": "csv", "path": "./data/source.csv"},
+            "target": {"type": "csv", "path": "./data/target.csv"},
+            "matching": {"keys": ["id"]},
+            "validation": {"checks": []},
+            "output": {"directory": "./output"},
+        },
+    )
+
+    with pytest.raises(ValueError, match="validation.checks"):
+        load_config(config_path)
+
+
+def test_fr003_different_check_selections_produce_distinct_configured_intent(tmp_path):
+    first_payload = {
+        "name": "first_check_selection",
+        "version": 1,
+        "source": {"type": "csv", "path": "./data/first_source.csv"},
+        "target": {"type": "csv", "path": "./data/first_target.csv"},
+        "matching": {"keys": ["id"]},
+        "validation": {"checks": ["missing_records"]},
+        "output": {"directory": "./output/first"},
+    }
+    second_payload = {
+        "name": "second_check_selection",
+        "version": 2,
+        "source": {"type": "csv", "path": "./data/second_source.csv"},
+        "target": {"type": "csv", "path": "./data/second_target.csv"},
+        "matching": {"keys": ["id"]},
+        "validation": {"checks": ["duplicate_records", "mismatched_values"]},
+        "output": {"directory": "./output/second"},
+    }
+
+    first_path = _write_yaml_config(tmp_path, first_payload)
+    second_path = tmp_path / "second_scenario.yaml"
+    second_path.write_text(yaml.safe_dump(second_payload, sort_keys=False), encoding="utf-8")
+
+    first_scenario = load_config(first_path)
+    second_scenario = load_config(second_path)
+
+    assert first_scenario.validation.checks == ["missing_records"]
+    assert second_scenario.validation.checks == ["duplicate_records", "mismatched_values"]
+    assert first_scenario != second_scenario
+
+
 def test_two_valid_yaml_scenarios_load_as_distinct_scenario_models(tmp_path):
     first_payload = {
         "name": "first_valid_scenario",
