@@ -7,6 +7,8 @@ SUPPORTED_VALIDATION_CHECKS = {
     "missing_records",
     "duplicate_records",
     "mismatched_values",
+    "schema_validation",
+    "structural_validation",
 }
 
 
