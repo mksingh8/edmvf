@@ -54,6 +54,15 @@ def test_irregular_row_width_fails_structural_validation(tmp_path):
     assert any(issue.kind == "structural" and "width" in issue.message.lower() for issue in result.issues)
 
 
+def test_file_access_failure_is_reported_as_file_access(tmp_path):
+    missing_path = tmp_path / "missing.csv"
+
+    result = validate_csv_dataset(missing_path, "source", ["schema_validation"])
+
+    assert result.passed is False
+    assert any(issue.kind == "file_access" for issue in result.issues)
+
+
 def test_malformed_csv_quoting_is_reported_separately_from_file_access(tmp_path):
     csv_path = _write_csv(tmp_path, "malformed.csv", 'id,name\n1,"unterminated\n')
 
@@ -61,6 +70,19 @@ def test_malformed_csv_quoting_is_reported_separately_from_file_access(tmp_path)
 
     assert result.passed is False
     assert any(issue.kind == "parse_error" for issue in result.issues)
+    assert not any(issue.kind == "file_access" for issue in result.issues)
+
+
+def test_schema_validation_stops_before_comparison_when_headers_are_invalid(tmp_path):
+    source_path = _write_csv(tmp_path, "source.csv", "id,name,id\n1,Alpha,2\n")
+    target_path = _write_csv(tmp_path, "target.csv", "name,id\nAlpha,1\n")
+
+    result = validate_csv_schema(source_path, target_path, ["schema_validation"])
+
+    assert result.passed is False
+    assert any("duplicate" in issue.message.lower() for issue in result.issues)
+    assert not any("missing" in issue.message.lower() for issue in result.issues)
+    assert not any("unexpected" in issue.message.lower() for issue in result.issues)
 
 
 def test_schema_validation_ignores_column_order_and_reports_missing_or_unexpected_columns(tmp_path):
