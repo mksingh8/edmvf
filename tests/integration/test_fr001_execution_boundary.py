@@ -35,7 +35,9 @@ output:
     assert result["scenario_name"] == "csv_basic_validation"
     assert result["source_type"] == "csv"
     assert result["target_type"] == "csv"
-    assert result["status"] == "ready"
+    assert result["status"] == "not_implemented"
+    assert result["missing_records"]["status"] == "not_implemented"
+    assert result["duplicate_records"]["status"] == "not_implemented"
 
 
 def test_fr002_source_and_target_identities_remain_available_at_execution_boundary(tmp_path):
@@ -71,7 +73,8 @@ output:
     assert scenario.target.type == "csv"
     assert result["source_type"] == "csv"
     assert result["target_type"] == "csv"
-    assert result["status"] == "ready"
+    assert result["status"] == "not_implemented"
+    assert result["missing_records"]["status"] == "not_implemented"
 
 
 def test_same_config_reloads_to_equivalent_scenario(tmp_path):

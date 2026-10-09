@@ -3,11 +3,16 @@ from __future__ import annotations
 from .models import Scenario
 
 SUPPORTED_SOURCE_TYPES = {"csv"}
-SUPPORTED_VALIDATION_CHECKS = {
+IMPLEMENTED_VALIDATION_CHECKS = {
+    "schema_validation",
+    "structural_validation",
+}
+UNIMPLEMENTED_VALIDATION_CHECKS = {
     "missing_records",
     "duplicate_records",
     "mismatched_values",
 }
+SUPPORTED_VALIDATION_CHECKS = IMPLEMENTED_VALIDATION_CHECKS | UNIMPLEMENTED_VALIDATION_CHECKS
 
 
 def validate_scenario(scenario: Scenario) -> Scenario:
