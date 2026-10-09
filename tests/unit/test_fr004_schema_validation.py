@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from edmvf.config.loader import load_config
+from edmvf.config.models import DataSource, MatchingConfig, OutputConfig, Scenario, ValidationConfig
 from edmvf.runner import run_scenario
 from edmvf.validation.schema import validate_csv_dataset, validate_csv_schema
 
@@ -139,13 +140,13 @@ output:
     assert result["schema_validation"]["passed"] is True
 
 
-def test_run_scenario_skips_fr004_when_no_matching_checks_selected(tmp_path):
+def test_run_scenario_marks_unimplemented_checks_as_not_implemented(tmp_path):
     source_path = _write_csv(tmp_path, "source.csv", "id,name\n1,Alpha\n")
     target_path = _write_csv(tmp_path, "target.csv", "id,name\n1,Alpha\n")
     config_path = tmp_path / "scenario.yaml"
     config_path.write_text(
         f"""
-name: fr004_not_selected
+name: fr004_unimplemented_only
 version: 1
 source:
   type: csv
@@ -168,6 +169,87 @@ output:
     scenario = load_config(config_path)
     result = run_scenario(scenario)
 
-    assert result["status"] == "ready"
+    assert result["status"] == "not_implemented"
+    assert result["missing_records"]["status"] == "not_implemented"
     assert "schema_validation" not in result
     assert "structural_validation" not in result
+
+
+def test_run_scenario_reports_mixed_implemented_and_unimplemented_checks(tmp_path):
+    source_path = _write_csv(tmp_path, "source.csv", "id,name\n1,Alpha\n")
+    target_path = _write_csv(tmp_path, "target.csv", "id,name\n1,Alpha\n")
+    config_path = tmp_path / "scenario.yaml"
+    config_path.write_text(
+        f"""
+name: fr004_mixed_checks
+version: 1
+source:
+  type: csv
+  path: {source_path}
+target:
+  type: csv
+  path: {target_path}
+matching:
+  keys:
+    - id
+validation:
+  checks:
+    - schema_validation
+    - missing_records
+output:
+  directory: ./output
+""".strip(),
+        encoding="utf-8",
+    )
+
+    scenario = load_config(config_path)
+    result = run_scenario(scenario)
+
+    assert result["status"] == "not_implemented"
+    assert result["schema_validation"]["passed"] is True
+    assert result["missing_records"]["status"] == "not_implemented"
+
+
+def test_run_scenario_rejects_unsupported_source_target_types_at_boundary():
+    scenario = Scenario(
+        name="bad_runner_boundary",
+        version=1,
+        source=DataSource(type="json", path="./data/source.json"),
+        target=DataSource(type="csv", path="./data/target.csv"),
+        matching=MatchingConfig(keys=["id"]),
+        validation=ValidationConfig(checks=["schema_validation"]),
+        output=OutputConfig(directory="./output"),
+    )
+
+    with pytest.raises(ValueError, match="unsupported source type"):
+        run_scenario(scenario)
+
+
+def test_run_scenario_rejects_unknown_checks_at_boundary():
+    scenario = Scenario(
+        name="bad_runner_checks",
+        version=1,
+        source=DataSource(type="csv", path="./data/source.csv"),
+        target=DataSource(type="csv", path="./data/target.csv"),
+        matching=MatchingConfig(keys=["id"]),
+        validation=ValidationConfig(checks=["definitely_not_real"]),
+        output=OutputConfig(directory="./output"),
+    )
+
+    with pytest.raises(ValueError, match="unsupported validation checks"):
+        run_scenario(scenario)
+
+
+def test_run_scenario_rejects_invalid_nested_configuration_at_boundary():
+    scenario = Scenario(
+        name="bad_runner_nested",
+        version=1,
+        source=DataSource(type="csv", path="./data/source.csv"),
+        target=DataSource(type="csv", path="./data/target.csv"),
+        matching=MatchingConfig(keys=[]),
+        validation=ValidationConfig(checks=["schema_validation"]),
+        output=OutputConfig(directory="./output"),
+    )
+
+    with pytest.raises(ValueError, match="matching.keys"):
+        run_scenario(scenario)
