@@ -40,3 +40,18 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local AI assistant configuration (kept out of the public repository)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AI_CONTEXT.md
+
+# Private working material (lives in a separate private repository)
+04_Original_Contribution*/
+private/
+edmvf-evidence/
+*.docx
+*.xlsx
+*.pptx
+~$*
