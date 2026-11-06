@@ -3,6 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+# Models map raw configuration values; they never coerce. Type and value rules
+# live in config.validator.validate_scenario so that YAML-loaded and directly
+# constructed scenarios obey one contract.
+
+
+def _reject_unknown_keys(mapping: dict[Any, Any], allowed: set[str], section: str) -> None:
+    unknown = sorted(str(key) for key in mapping if key not in allowed)
+    if unknown:
+        raise ValueError(f"unknown configuration key(s) in {section}: {unknown}")
+
 
 @dataclass(frozen=True)
 class DataSource:
@@ -10,16 +20,11 @@ class DataSource:
     path: str
 
     @classmethod
-    def from_mapping(cls, mapping: dict[str, Any] | None) -> "DataSource":
+    def from_mapping(cls, mapping: dict[str, Any] | None, role: str = "source") -> "DataSource":
         if not isinstance(mapping, dict):
-            raise ValueError("source must be a mapping with type and path")
-        source_type = mapping.get("type")
-        source_path = mapping.get("path")
-        if not source_type:
-            raise ValueError("source.type is required")
-        if not source_path:
-            raise ValueError("source.path is required")
-        return cls(type=str(source_type), path=str(source_path))
+            raise ValueError(f"{role} must be a mapping with type and path, got {type(mapping).__name__}")
+        _reject_unknown_keys(mapping, {"type", "path"}, role)
+        return cls(type=mapping.get("type"), path=mapping.get("path"))
 
 
 @dataclass(frozen=True)
@@ -29,11 +34,9 @@ class MatchingConfig:
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any] | None) -> "MatchingConfig":
         if not isinstance(mapping, dict):
-            raise ValueError("matching must be a mapping with key fields")
-        keys = mapping.get("keys")
-        if not isinstance(keys, list) or not keys:
-            raise ValueError("matching.keys must contain at least one key field")
-        return cls(keys=[str(key) for key in keys])
+            raise ValueError(f"matching must be a mapping with key fields, got {type(mapping).__name__}")
+        _reject_unknown_keys(mapping, {"keys"}, "matching")
+        return cls(keys=mapping.get("keys"))
 
 
 @dataclass(frozen=True)
@@ -43,11 +46,9 @@ class ValidationConfig:
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any] | None) -> "ValidationConfig":
         if not isinstance(mapping, dict):
-            raise ValueError("validation must be a mapping with checks")
-        checks = mapping.get("checks")
-        if not isinstance(checks, list) or not checks:
-            raise ValueError("validation.checks must contain at least one check")
-        return cls(checks=[str(check) for check in checks])
+            raise ValueError(f"validation must be a mapping with checks, got {type(mapping).__name__}")
+        _reject_unknown_keys(mapping, {"checks"}, "validation")
+        return cls(checks=mapping.get("checks"))
 
 
 @dataclass(frozen=True)
@@ -57,17 +58,15 @@ class OutputConfig:
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any] | None) -> "OutputConfig":
         if not isinstance(mapping, dict):
-            raise ValueError("output must be a mapping with a directory")
-        directory = mapping.get("directory")
-        if not directory:
-            raise ValueError("output.directory is required")
-        return cls(directory=str(directory))
+            raise ValueError(f"output must be a mapping with a directory, got {type(mapping).__name__}")
+        _reject_unknown_keys(mapping, {"directory"}, "output")
+        return cls(directory=mapping.get("directory"))
 
 
 @dataclass(frozen=True)
 class Scenario:
     name: str
-    version: int | str
+    version: int | str | None
     source: DataSource
     target: DataSource
     matching: MatchingConfig
@@ -77,36 +76,23 @@ class Scenario:
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any] | None) -> "Scenario":
         if not isinstance(mapping, dict):
-            raise ValueError("scenario configuration must be a mapping")
+            raise ValueError(f"scenario configuration must be a mapping, got {type(mapping).__name__}")
+        _reject_unknown_keys(
+            mapping,
+            {"name", "version", "source", "target", "matching", "validation", "output"},
+            "scenario",
+        )
 
-        name = mapping.get("name")
-        version = mapping.get("version")
-        if not name:
-            raise ValueError("scenario.name is required")
-
-        if "source" not in mapping or mapping.get("source") is None:
-            raise ValueError("source is required")
-        if "target" not in mapping or mapping.get("target") is None:
-            raise ValueError("target is required")
-        if "matching" not in mapping or mapping.get("matching") is None:
-            raise ValueError("matching is required")
-        if "validation" not in mapping or mapping.get("validation") is None:
-            raise ValueError("validation is required")
-        if "output" not in mapping or mapping.get("output") is None:
-            raise ValueError("output is required")
-
-        source = DataSource.from_mapping(mapping.get("source"))
-        target = DataSource.from_mapping(mapping.get("target"))
-        matching = MatchingConfig.from_mapping(mapping.get("matching"))
-        validation = ValidationConfig.from_mapping(mapping.get("validation"))
-        output = OutputConfig.from_mapping(mapping.get("output"))
+        for section in ("source", "target", "matching", "validation", "output"):
+            if mapping.get(section) is None:
+                raise ValueError(f"{section} is required")
 
         return cls(
-            name=str(name),
-            version=version,
-            source=source,
-            target=target,
-            matching=matching,
-            validation=validation,
-            output=output,
+            name=mapping.get("name"),
+            version=mapping.get("version"),
+            source=DataSource.from_mapping(mapping["source"], role="source"),
+            target=DataSource.from_mapping(mapping["target"], role="target"),
+            matching=MatchingConfig.from_mapping(mapping["matching"]),
+            validation=ValidationConfig.from_mapping(mapping["validation"]),
+            output=OutputConfig.from_mapping(mapping["output"]),
         )
