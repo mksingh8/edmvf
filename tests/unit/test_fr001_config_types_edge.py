@@ -663,9 +663,8 @@ def test_missing_files_with_valid_config_are_file_access_issues_not_config_error
     ]
 
 
-def test_missing_source_with_schema_validation_reports_only_source_file_access_until_ir009(tmp_path):
-    # Documents CURRENT behaviour (schema_validation stops at the first unreadable
-    # file). IR-009 will change this to report both sides.
+def test_missing_files_with_schema_validation_report_source_and_target_file_access(tmp_path):
+    # IR-009: schema_validation reports every unreadable side, source first.
     scenario = _valid_scenario(
         source=DataSource("csv", str(tmp_path / "absent-source.csv")),
         target=DataSource("csv", str(tmp_path / "absent-target.csv")),
@@ -675,7 +674,7 @@ def test_missing_source_with_schema_validation_reports_only_source_file_access_u
 
     assert result["status"] == "failed"
     issues = result["schema_validation"]["issues"]
-    assert [(i["kind"], i["dataset"]) for i in issues] == [("file_access", "source")]
+    assert [(i["kind"], i["dataset"]) for i in issues] == [("file_access", "source"), ("file_access", "target")]
 
 
 def test_missing_target_only_is_a_target_file_access_issue(tmp_path):
