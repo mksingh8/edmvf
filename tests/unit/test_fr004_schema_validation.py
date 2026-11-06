@@ -323,15 +323,15 @@ def test_invalid_utf8_target_reported_as_target_parse_error_in_schema_comparison
     assert [(i.kind, i.dataset) for i in result.issues] == [("parse_error", "target")]
 
 
-def test_invalid_utf8_on_both_sides_currently_reports_only_source_until_ir009(tmp_path):
-    # Documents CURRENT behavior. IR-009 will change this to report both sides.
+def test_invalid_utf8_on_both_sides_reports_source_and_target(tmp_path):
+    # IR-009: one unreadable side no longer masks the other.
     source_path = _write_bytes(tmp_path, "source.csv", BAD_UTF8)
     target_path = _write_bytes(tmp_path, "target.csv", BAD_UTF8)
 
     result = validate_csv_schema(source_path, target_path, ["schema_validation"])
 
     assert result.passed is False
-    assert [(i.kind, i.dataset) for i in result.issues] == [("parse_error", "source")]
+    assert [(i.kind, i.dataset) for i in result.issues] == [("parse_error", "source"), ("parse_error", "target")]
 
 
 def test_invalid_utf8_late_in_file_is_reported_as_parse_error(tmp_path):

@@ -10,6 +10,16 @@ class ValidationIssue:
     message: str
     row_number: int | None = None
     column_name: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+
+    # row_number is the 1-based ordinal of the logical CSV record (header = 1,
+    # first data record = 2); line breaks inside quoted fields do not advance
+    # it. start_line/end_line are the inclusive 1-based physical lines that
+    # record occupies; only "\n", "\r\n" and a lone "\r" end a line. For a
+    # CSV parse error, end_line is the line where parsing stopped, which can
+    # precede the real end of the record. All three are None when an issue has
+    # no record location.
 
     def to_dict(self) -> dict:
         return {
@@ -18,6 +28,8 @@ class ValidationIssue:
             "message": self.message,
             "row_number": self.row_number,
             "column_name": self.column_name,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
         }
 
 
