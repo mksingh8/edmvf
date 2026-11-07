@@ -202,8 +202,12 @@ class IoProbe:
         # byte count to check it against, so it can never make the probe call itself blind.
         self.stats = {}
         for path in paths:
-            key = self._key(path)  # also used to match opens, so the size must come from the same path
-            self.stats[key] = {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(key) if os.path.isfile(key) else 0}
+            key = self._key(path)  # case-normalised on Windows; used only to match opens
+            # The size comes from the absolute spelling with the case preserved. The key may be lower-cased,
+            # and in a case-sensitive directory the lower-cased name can name a file that does not exist,
+            # which would give size 0 and silently switch the blind check off for that path.
+            spelled = os.path.abspath(os.fsdecode(path))
+            self.stats[key] = {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(spelled) if os.path.isfile(spelled) else 0}
         self.active = False
 
     @staticmethod
