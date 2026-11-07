@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[2] / "benchmarks" / "csv_validation_benchmark.py"
 
 
@@ -172,7 +174,9 @@ def test_a_later_probe_restores_the_real_functions(tmp_path):
     assert (io.open, builtins.open, pathlib.Path.open) == originals
 
 
-def test_byte_counting_never_changes_what_the_code_under_test_does(tmp_path):
+def test_byte_counting_does_not_change_surrogateescape_reads(tmp_path):
+    # Supported guarantee: text read in strict mode or with errors="surrogateescape" is returned
+    # unchanged and counted exactly. Other lone surrogates are a documented limitation.
     harness = _load_harness()
     path = tmp_path / "data.csv"
     path.write_bytes(b"id\n1\xff\n")
@@ -182,3 +186,58 @@ def test_byte_counting_never_changes_what_the_code_under_test_does(tmp_path):
 
     assert text == "id\n1\udcff\n"
     assert probe.stats[next(iter(probe.stats))]["bytes_read"] == len(b"id\n1\xff\n")
+
+
+def test_lone_surrogates_outside_the_escape_range_are_a_documented_limitation(tmp_path):
+    """Documents the limit of the guarantee above; EDMVF reads bytes and cannot produce such text."""
+    harness = _load_harness()
+    path = tmp_path / "data.csv"
+    path.write_bytes(bytes([0xED, 0xA0, 0x80]))  # UTF-8 encoding of the lone surrogate U+D800
+    assert open(path, encoding="utf-8", errors="surrogatepass").read() == chr(0xD800)  # fine without the probe
+
+    with harness.IoProbe([path]):
+        with pytest.raises(UnicodeEncodeError):
+            open(path, encoding="utf-8", errors="surrogatepass").read()
+
+
+def test_probes_cannot_be_nested_or_reentered_and_a_failed_entry_changes_nothing(tmp_path):
+    import builtins
+    import io
+    import pathlib
+
+    harness = _load_harness()
+    path = tmp_path / "data.csv"
+    path.write_bytes(b"id,name\n1,a\n")
+    originals = (io.open, builtins.open, pathlib.Path.open)
+
+    outer = harness.IoProbe([path])
+    with outer:
+        installed = (io.open, builtins.open, pathlib.Path.open)
+        with pytest.raises(RuntimeError, match="already active"):
+            harness.IoProbe([path]).__enter__()
+        with pytest.raises(RuntimeError, match="already active"):
+            outer.__enter__()  # the same probe, re-entered while active
+        assert (io.open, builtins.open, pathlib.Path.open) == installed  # nothing was replaced
+        assert path.read_bytes() == b"id,name\n1,a\n"  # the outer probe still counts
+
+    (stats,) = outer.stats.values()
+    assert (stats["opens"], stats["bytes_read"]) == (1, stats["size"])
+    assert (io.open, builtins.open, pathlib.Path.open) == originals
+    with harness.IoProbe([path]):  # and a new probe works after the failed attempts
+        pass
+    assert (io.open, builtins.open, pathlib.Path.open) == originals
+
+
+def test_size_is_taken_from_the_normalised_path_so_odd_spellings_stay_checked(tmp_path):
+    harness = _load_harness()
+    path = tmp_path / "data.csv"
+    path.write_bytes(b"id,name\n1,a\n")
+    spellings = [str(path) + os.sep, str(tmp_path / "sub" / ".." / "data.csv"), os.fsencode(str(path)), path]
+
+    for spelling in spellings:
+        with harness.IoProbe([spelling]) as probe:
+            assert path.read_bytes() == b"id,name\n1,a\n"
+        (stats,) = probe.stats.values()
+        assert stats["size"] == path.stat().st_size, spelling
+        assert (stats["opens"], stats["bytes_read"]) == (1, stats["size"]), spelling
+        assert harness.blind_paths(probe.stats) == []

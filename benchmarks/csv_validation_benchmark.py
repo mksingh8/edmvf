@@ -128,6 +128,10 @@ class _CountingFile:
         self._raw, self._stats = raw, stats
 
     def _count(self, data):
+        # Supported: text read in strict mode, or with errors="surrogateescape" (the result is
+        # unchanged and counted exactly). Not supported: text holding lone surrogates outside
+        # the escape range U+DC80 to U+DCFF (for example from errors="surrogatepass"); counting
+        # such text raises. EDMVF itself reads bytes, so it never produces them.
         self._stats["bytes_read"] += len(data) if isinstance(data, (bytes, bytearray)) else len(data.encode("utf-8", "surrogateescape"))
         return data
 
@@ -196,10 +200,10 @@ class IoProbe:
     def __init__(self, paths):
         # size is 0 for a path that is not a regular file (missing, a directory): there is no
         # byte count to check it against, so it can never make the probe call itself blind.
-        self.stats = {
-            self._key(p): {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(p) if os.path.isfile(p) else 0}
-            for p in paths
-        }
+        self.stats = {}
+        for path in paths:
+            key = self._key(path)  # also used to match opens, so the size must come from the same path
+            self.stats[key] = {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(key) if os.path.isfile(key) else 0}
         self.active = False
 
     @staticmethod
@@ -231,6 +235,10 @@ class IoProbe:
         return handle
 
     def __enter__(self):
+        # Probes do not nest: the real functions are captured on entry, so a second entry would
+        # capture a wrapper and an out-of-order exit would leave the wrappers installed.
+        if getattr(sys, "_edmvf_active_probe", None) is not None:
+            raise RuntimeError("an I/O probe is already active; probes cannot be nested or re-entered")
         self._real_open = io.open
         self._real_path_open = pathlib.Path.open
         if not getattr(sys, "_edmvf_audit_installed", False):
