@@ -272,11 +272,14 @@ def test_schema_validation_alone_does_not_report_width_issues(tmp_path):
     assert result.issues == [] and result.passed is True
 
 
-def test_validate_csv_schema_without_schema_check_reads_nothing(tmp_path, monkeypatch):
+def test_validate_csv_schema_without_schema_check_is_rejected_and_reads_nothing(tmp_path, monkeypatch):
+    # IR-006: an explicit selection that omits schema_validation used to return
+    # passed=True without reading anything; it is now a ValueError.
     calls = []
     monkeypatch.setattr(schema_module, "read_csv_dataset", lambda p: calls.append(p))
-    result = validate_csv_schema(tmp_path / "a.csv", tmp_path / "b.csv", STRUCT)
-    assert result.passed is True and result.issues == [] and calls == []
+    with pytest.raises(ValueError, match="schema_validation"):
+        validate_csv_schema(tmp_path / "a.csv", tmp_path / "b.csv", STRUCT)
+    assert calls == []
 
 
 # --- single read (spy) ---------------------------------------------------------

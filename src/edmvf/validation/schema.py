@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from edmvf.config.models import Scenario
+from edmvf.config.validator import IMPLEMENTED_VALIDATION_CHECKS, validate_scenario
 from edmvf.data.csv_dataset import CsvDataset, CsvFileAccessError, CsvParseError, read_csv_dataset
 from edmvf.validation.result import SchemaValidationResult, ValidationIssue
 
@@ -27,6 +28,57 @@ def _issue(
         start_line=start_line,
         end_line=end_line,
     )
+
+
+# Accepted types for the `checks` argument of the Python validators: list, tuple,
+# set or frozenset of check names. Any other type (for example a bare string,
+# bytes, a dict, a generator or a range) is outside the supported types and is
+# rejected. `None` means each function's documented default. The same rules apply
+# to every accepted type. A set has no order, so its names are sorted to keep
+# error messages deterministic; a list or tuple keeps the order given. Duplicates
+# can only occur in a list or tuple (a set or frozenset has already removed them).
+# YAML configuration and Scenario.validation.checks must be a list.
+CheckSelection = list[str] | tuple[str, ...] | set[str] | frozenset[str]
+SELECTION_TYPES = (list, tuple, set, frozenset)
+
+DATASET_CHECKS = ("schema_validation", "structural_validation")
+
+
+def _select_checks(checks: CheckSelection | None, default: list[str], allowed: Iterable[str], function: str) -> list[str]:
+    """Resolve a check selection for a lower-level validator.
+
+    `None` means the documented default of `function`. An explicit selection is
+    never replaced by a default: an empty, unknown, unsupported or duplicated
+    selection raises ValueError before any file is read.
+    """
+    if checks is None:
+        return list(default)
+    if not isinstance(checks, SELECTION_TYPES):
+        raise ValueError(
+            f"{function}: checks must be a list, tuple, set or frozenset of check names, got {type(checks).__name__}"
+        )
+    is_unordered = isinstance(checks, (set, frozenset))
+    selected = list(checks)
+    if not selected:
+        raise ValueError(f"{function}: checks must contain at least one check")
+    # Type-check every element before sorting or printing anything, so a set is
+    # rejected exactly like a list (never via repr() or a sort comparison).
+    non_strings = [item for item in selected if not isinstance(item, str)]
+    if non_strings:
+        # A set has no order: name the alphabetically first offending type.
+        type_name = min(type(item).__name__ for item in non_strings) if is_unordered else type(non_strings[0]).__name__
+        raise ValueError(f"{function}: checks must be strings, got {type_name}")
+    if is_unordered:
+        # Sets are unordered; sort so messages do not depend on hash randomization.
+        selected.sort()
+    allowed_names = set(allowed)
+    unsupported = [item for item in selected if item not in allowed_names]
+    if unsupported:
+        raise ValueError(f"{function}: unsupported checks {unsupported}; supported: {sorted(allowed_names)}")
+    if len(set(selected)) != len(selected):
+        duplicates = [item for item in dict.fromkeys(selected) if selected.count(item) > 1]
+        raise ValueError(f"{function}: checks contain duplicate entries: {duplicates}")
+    return selected
 
 
 def _load_dataset(path: str | Path, dataset_name: str) -> tuple[CsvDataset | None, list[ValidationIssue]]:
@@ -136,8 +188,9 @@ def _dataset_issues(dataset: CsvDataset, dataset_name: str, selected_checks: set
     return issues
 
 
-def validate_csv_dataset(csv_path: str | Path, dataset_name: str, checks: Iterable[str] | None = None) -> SchemaValidationResult:
-    selected_checks = set(checks or [])
+def validate_csv_dataset(csv_path: str | Path, dataset_name: str, checks: CheckSelection | None = None) -> SchemaValidationResult:
+    """Validate one CSV. `checks=None` runs the default: header integrity and row widths."""
+    selected_checks = set(_select_checks(checks, list(DATASET_CHECKS), DATASET_CHECKS, "validate_csv_dataset"))
     result = SchemaValidationResult(dataset=dataset_name, passed=True, source_path=str(csv_path))
 
     dataset, issues = _load_dataset(csv_path, dataset_name)
@@ -151,12 +204,14 @@ def validate_csv_dataset(csv_path: str | Path, dataset_name: str, checks: Iterab
     return result
 
 
-def validate_csv_schema(source_path: str | Path, target_path: str | Path, checks: Iterable[str] | None = None) -> SchemaValidationResult:
-    selected_checks = set(checks or [])
+def validate_csv_schema(source_path: str | Path, target_path: str | Path, checks: CheckSelection | None = None) -> SchemaValidationResult:
+    """Compare source and target columns. `checks=None` runs `schema_validation`;
+    an explicit selection must include `schema_validation`."""
+    selected = _select_checks(checks, ["schema_validation"], DATASET_CHECKS, "validate_csv_schema")
+    if "schema_validation" not in selected:
+        raise ValueError("validate_csv_schema: checks must include 'schema_validation'")
+    selected_checks = set(selected)
     result = SchemaValidationResult(dataset="schema_comparison", passed=True, source_path=str(source_path), target_path=str(target_path))
-
-    if "schema_validation" not in selected_checks:
-        return result
 
     # Read each file exactly once and report every defect on both sides,
     # source first, so one unreadable file never masks the other side.
@@ -193,8 +248,15 @@ def validate_csv_schema(source_path: str | Path, target_path: str | Path, checks
     return result
 
 
-def validate_csv_scenario(scenario: Scenario, checks: Iterable[str] | None = None) -> dict[str, SchemaValidationResult]:
-    selected_checks = list(checks or scenario.validation.checks)
+def validate_csv_scenario(scenario: Scenario, checks: CheckSelection | None = None) -> dict[str, SchemaValidationResult]:
+    """Run the implemented CSV checks. `checks=None` runs the scenario's configured
+    implemented checks (possibly none); an explicit selection is never replaced
+    by a default. Execution order is fixed: structural, then schema."""
+    validate_scenario(scenario)
+    if checks is None:
+        selected_checks = [check for check in scenario.validation.checks if check in IMPLEMENTED_VALIDATION_CHECKS]
+    else:
+        selected_checks = _select_checks(checks, [], IMPLEMENTED_VALIDATION_CHECKS, "validate_csv_scenario")
     results: dict[str, SchemaValidationResult] = {}
 
     if "structural_validation" in selected_checks:

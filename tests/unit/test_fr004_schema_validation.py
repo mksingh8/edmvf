@@ -136,7 +136,7 @@ output:
     scenario = load_config(config_path)
     result = run_scenario(scenario)
 
-    assert result["status"] == "ready"
+    assert result["status"] == "passed"
     assert result["schema_validation"]["passed"] is True
 
 
@@ -169,7 +169,7 @@ output:
     scenario = load_config(config_path)
     result = run_scenario(scenario)
 
-    assert result["status"] == "not_implemented"
+    assert result["status"] == "incomplete"
     assert result["missing_records"]["status"] == "not_implemented"
     assert "schema_validation" not in result
     assert "structural_validation" not in result
@@ -205,7 +205,7 @@ output:
     scenario = load_config(config_path)
     result = run_scenario(scenario)
 
-    assert result["status"] == "not_implemented"
+    assert result["status"] == "incomplete"
     assert result["schema_validation"]["passed"] is True
     assert result["missing_records"]["status"] == "not_implemented"
 
