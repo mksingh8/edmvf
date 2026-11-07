@@ -47,28 +47,33 @@ def read_csv_dataset(path: str | Path) -> CsvDataset:
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
     try:
-        # Decode the whole file at once so a UnicodeDecodeError carries the
-        # absolute byte offset (incremental text-mode decoding reports an offset
-        # relative to an internal buffer chunk).
-        text = csv_path.read_bytes().decode("utf-8")
-        reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+        data = csv_path.read_bytes()
+        # Validate the whole buffer first, so a UnicodeDecodeError carries the
+        # absolute byte offset (incremental decoding reports an offset relative
+        # to an internal chunk) and still takes precedence over a CSV error. The
+        # decoded text is discarded on purpose: parsing below decodes the same
+        # bytes in small chunks, so no full-size str or StringIO copy is held
+        # next to the rows.
+        data.decode("utf-8")
         records: list[list[str]] = []
         line_spans: list[tuple[int, int]] = []
         previous_line = 0
-        try:
-            for record in reader:
-                records.append(record)
-                line_spans.append((previous_line + 1, reader.line_num))
-                previous_line = reader.line_num
-        except csv.Error as exc:
-            # Locate the failing record: its ordinal (header = 1) and the lines it spans.
-            raise CsvParseError(
-                csv_path,
-                f"Malformed CSV content in '{csv_path}': {exc}",
-                row_number=len(records) + 1,
-                start_line=previous_line + 1,
-                end_line=reader.line_num,
-            ) from exc
+        with io.TextIOWrapper(io.BytesIO(data), encoding="utf-8", newline="") as stream:
+            reader = csv.reader(stream, strict=True)
+            try:
+                for record in reader:
+                    records.append(record)
+                    line_spans.append((previous_line + 1, reader.line_num))
+                    previous_line = reader.line_num
+            except csv.Error as exc:
+                # Locate the failing record: its ordinal (header = 1) and the lines it spans.
+                raise CsvParseError(
+                    csv_path,
+                    f"Malformed CSV content in '{csv_path}': {exc}",
+                    row_number=len(records) + 1,
+                    start_line=previous_line + 1,
+                    end_line=reader.line_num,
+                ) from exc
 
         if not records:
             return CsvDataset(headers=[], rows=[])

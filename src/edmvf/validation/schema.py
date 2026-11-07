@@ -188,6 +188,55 @@ def _dataset_issues(dataset: CsvDataset, dataset_name: str, selected_checks: set
     return issues
 
 
+def _read_side(
+    path: str | Path, dataset_name: str, selections: dict[str, set[str]]
+) -> tuple[list[str] | None, dict[str, list[ValidationIssue]]]:
+    """Read one input once and run every requested per-dataset check on that read.
+
+    `selections` maps a result name to the set of checks it needs. Returns the
+    header row (None if the input could not be loaded) and the issues per result
+    name. The rows are not returned, so they are released as soon as this returns.
+    """
+    dataset, load_issues = _load_dataset(path, dataset_name)
+    if dataset is None:
+        return None, {name: list(load_issues) for name in selections}
+    issues = {name: _dataset_issues(dataset, dataset_name, checks) for name, checks in selections.items()}
+    return list(dataset.headers), issues
+
+
+def _schema_result(
+    source_path: str | Path,
+    target_path: str | Path,
+    source_headers: list[str] | None,
+    target_headers: list[str] | None,
+    source_issues: list[ValidationIssue],
+    target_issues: list[ValidationIssue],
+) -> SchemaValidationResult:
+    """Assemble the source/target comparison from what was read on each side."""
+    result = SchemaValidationResult(dataset="schema_comparison", passed=True, source_path=str(source_path), target_path=str(target_path))
+    result.issues.extend(source_issues)
+    result.issues.extend(target_issues)
+
+    # A column comparison is meaningless against an unreadable or ambiguous header.
+    if result.issues:
+        result.passed = False
+        return result
+
+    missing_columns = sorted(set(source_headers) - set(target_headers))
+    unexpected_columns = sorted(set(target_headers) - set(source_headers))
+
+    # Column differences are findings about the target (the dataset under test).
+    if missing_columns:
+        result.issues.append(_issue("schema", "target", f"Missing columns in target: {missing_columns}."))
+    if unexpected_columns:
+        result.issues.append(_issue("schema", "target", f"Unexpected columns in target: {unexpected_columns}."))
+
+    if result.issues:
+        result.passed = False
+
+    return result
+
+
 def validate_csv_dataset(csv_path: str | Path, dataset_name: str, checks: CheckSelection | None = None) -> SchemaValidationResult:
     """Validate one CSV. `checks=None` runs the default: header integrity and row widths."""
     selected_checks = set(_select_checks(checks, list(DATASET_CHECKS), DATASET_CHECKS, "validate_csv_dataset"))
@@ -211,41 +260,21 @@ def validate_csv_schema(source_path: str | Path, target_path: str | Path, checks
     if "schema_validation" not in selected:
         raise ValueError("validate_csv_schema: checks must include 'schema_validation'")
     selected_checks = set(selected)
-    result = SchemaValidationResult(dataset="schema_comparison", passed=True, source_path=str(source_path), target_path=str(target_path))
 
     # Read each file exactly once and report every defect on both sides,
-    # source first, so one unreadable file never masks the other side.
-    source_dataset, source_issues = _load_dataset(source_path, "source")
-    target_dataset, target_issues = _load_dataset(target_path, "target")
-    if source_dataset is not None:
-        source_issues.extend(_dataset_issues(source_dataset, "source", selected_checks))
-    if target_dataset is not None:
-        target_issues.extend(_dataset_issues(target_dataset, "target", selected_checks))
-
-    result.issues.extend(source_issues)
-    result.issues.extend(target_issues)
-
-    # A column comparison is meaningless against an unreadable or ambiguous header.
-    if result.issues:
-        result.passed = False
-        return result
-
-    source_headers = set(source_dataset.headers)
-    target_headers = set(target_dataset.headers)
-
-    missing_columns = sorted(source_headers - target_headers)
-    unexpected_columns = sorted(target_headers - source_headers)
-
-    # Column differences are findings about the target (the dataset under test).
-    if missing_columns:
-        result.issues.append(_issue("schema", "target", f"Missing columns in target: {missing_columns}."))
-    if unexpected_columns:
-        result.issues.append(_issue("schema", "target", f"Unexpected columns in target: {unexpected_columns}."))
-
-    if result.issues:
-        result.passed = False
-
-    return result
+    # source first, so one unreadable file never masks the other side. Each side
+    # is checked and released before the other is loaded.
+    selections = {"schema_validation": selected_checks}
+    source_headers, source_issues = _read_side(source_path, "source", selections)
+    target_headers, target_issues = _read_side(target_path, "target", selections)
+    return _schema_result(
+        source_path,
+        target_path,
+        source_headers,
+        target_headers,
+        source_issues["schema_validation"],
+        target_issues["schema_validation"],
+    )
 
 
 def validate_csv_scenario(scenario: Scenario, checks: CheckSelection | None = None) -> dict[str, SchemaValidationResult]:
@@ -257,24 +286,35 @@ def validate_csv_scenario(scenario: Scenario, checks: CheckSelection | None = No
         selected_checks = [check for check in scenario.validation.checks if check in IMPLEMENTED_VALIDATION_CHECKS]
     else:
         selected_checks = _select_checks(checks, [], IMPLEMENTED_VALIDATION_CHECKS, "validate_csv_scenario")
-    results: dict[str, SchemaValidationResult] = {}
+    ordered_checks = [check for check in ("structural_validation", "schema_validation") if check in selected_checks]
+    if not ordered_checks:
+        return {}
 
-    if "structural_validation" in selected_checks:
-        source_result = validate_csv_dataset(scenario.source.path, "source", ["structural_validation"])
-        target_result = validate_csv_dataset(scenario.target.path, "target", ["structural_validation"])
-        combined = SchemaValidationResult(
+    # Load each input once; every selected check shares that one read. Each side is
+    # checked and released before the other is loaded, so only one dataset's rows
+    # are in memory at a time.
+    selections = {check: {check} for check in ordered_checks}
+    source_headers, source_issues = _read_side(scenario.source.path, "source", selections)
+    target_headers, target_issues = _read_side(scenario.target.path, "target", selections)
+
+    results: dict[str, SchemaValidationResult] = {}
+    if "structural_validation" in selections:
+        issues = [*source_issues["structural_validation"], *target_issues["structural_validation"]]
+        results["structural_validation"] = SchemaValidationResult(
             dataset="structural_validation",
-            passed=source_result.passed and target_result.passed,
-            issues=[*source_result.issues, *target_result.issues],
+            passed=not issues,
+            issues=issues,
             source_path=scenario.source.path,
             target_path=scenario.target.path,
         )
-        if combined.issues:
-            combined.passed = False
-        results["structural_validation"] = combined
-
-    if "schema_validation" in selected_checks:
-        schema_result = validate_csv_schema(scenario.source.path, scenario.target.path, ["schema_validation"])
-        results["schema_validation"] = schema_result
+    if "schema_validation" in selections:
+        results["schema_validation"] = _schema_result(
+            scenario.source.path,
+            scenario.target.path,
+            source_headers,
+            target_headers,
+            source_issues["schema_validation"],
+            target_issues["schema_validation"],
+        )
 
     return results
