@@ -241,3 +241,37 @@ def test_size_is_taken_from_the_normalised_path_so_odd_spellings_stay_checked(tm
         assert stats["size"] == path.stat().st_size, spelling
         assert (stats["opens"], stats["bytes_read"]) == (1, stats["size"]), spelling
         assert harness.blind_paths(probe.stats) == []
+
+
+def _simulate_case_sensitive_directory(monkeypatch, exact_name):
+    """Windows lower-cases names in os.path.normcase. In a case-sensitive directory only the
+    exact-case spelling exists, so the lower-cased key names a file that does not exist."""
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(os.path, "normcase", lambda p: os.fspath(p).lower())
+    monkeypatch.setattr(os.path, "isfile", lambda p: real_isfile(p) and os.path.basename(os.fspath(p)) == exact_name)
+
+
+def test_size_is_taken_from_the_case_preserved_path_in_a_case_sensitive_directory(tmp_path, monkeypatch):
+    harness = _load_harness()
+    path = tmp_path / "MixedCase.csv"
+    path.write_bytes(b"id,name\n1,a\n")
+    _simulate_case_sensitive_directory(monkeypatch, "MixedCase.csv")
+
+    probe = harness.IoProbe([path])
+
+    (stats,) = probe.stats.values()
+    assert stats["size"] == len(b"id,name\n1,a\n")  # not 0: the blind check stays switched on
+
+
+def test_a_read_the_probe_cannot_see_is_still_reported_blind_in_a_case_sensitive_directory(tmp_path, monkeypatch):
+    harness = _load_harness()
+    path = tmp_path / "MixedCase.csv"
+    path.write_bytes(b"id,name\n1,a\n")
+    _simulate_case_sensitive_directory(monkeypatch, "MixedCase.csv")
+
+    with harness.IoProbe([path]) as probe:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        os.read(descriptor, 100)  # not wrapped by the probe
+        os.close(descriptor)
+
+    assert harness.blind_paths(probe.stats) == list(probe.stats)  # opened, size > 0, no byte counted
