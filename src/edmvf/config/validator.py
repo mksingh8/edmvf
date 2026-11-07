@@ -17,6 +17,11 @@ UNIMPLEMENTED_VALIDATION_CHECKS = {
 SUPPORTED_VALIDATION_CHECKS = IMPLEMENTED_VALIDATION_CHECKS | UNIMPLEMENTED_VALIDATION_CHECKS
 
 
+def _duplicates(values: list[str]) -> list[str]:
+    """Entries that occur more than once, in first-seen order."""
+    return [value for value in dict.fromkeys(values) if values.count(value) > 1]
+
+
 def _type_name(value: Any) -> str:
     return type(value).__name__
 
@@ -98,6 +103,9 @@ def validate_scenario(scenario: Scenario) -> Scenario:
     unsupported_checks = [check for check in scenario.validation.checks if check not in SUPPORTED_VALIDATION_CHECKS]
     if unsupported_checks:
         raise ValueError(f"unsupported validation checks: {unsupported_checks}")
+    duplicate_checks = _duplicates(scenario.validation.checks)
+    if duplicate_checks:
+        raise ValueError(f"validation.checks contains duplicate entries: {duplicate_checks}")
 
     _require_instance(scenario.output, OutputConfig, "output")
     _require_text(scenario.output.directory, "output.directory")

@@ -37,7 +37,7 @@ output:
     assert result["scenario_name"] == "csv_basic_validation"
     assert result["source_type"] == "csv"
     assert result["target_type"] == "csv"
-    assert result["status"] == "not_implemented"
+    assert result["status"] == "incomplete"
     assert result["missing_records"]["status"] == "not_implemented"
     assert result["duplicate_records"]["status"] == "not_implemented"
 
@@ -75,7 +75,7 @@ output:
     assert scenario.target.type == "csv"
     assert result["source_type"] == "csv"
     assert result["target_type"] == "csv"
-    assert result["status"] == "not_implemented"
+    assert result["status"] == "incomplete"
     assert result["missing_records"]["status"] == "not_implemented"
 
 
@@ -141,7 +141,7 @@ output:
 
     assert result["scenario_name"] == "123"
     assert result["matching_keys"] == ["007"]
-    assert result["status"] == "ready"
+    assert result["status"] == "passed"
 
 
 def test_ir004_wrong_types_in_yaml_fail_at_load_not_at_run(tmp_path):

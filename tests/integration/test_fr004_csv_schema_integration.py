@@ -42,7 +42,7 @@ output:
     scenario = load_config(config_path)
     result = run_scenario(scenario)
 
-    assert result["status"] == "ready"
+    assert result["status"] == "passed"
     assert result["schema_validation"]["passed"] is True
     assert result["structural_validation"]["passed"] is True
 

@@ -705,7 +705,7 @@ def test_clean_scenario_still_passes_end_to_end(tmp_path):
 
     result = run_scenario(scenario)
 
-    assert result["status"] == "ready"
+    assert result["status"] == "passed"
     assert result["matching_keys"] == ["id"]
     assert result["schema_validation"]["passed"] is True
     assert result["schema_validation"]["issues"] == []
