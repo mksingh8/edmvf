@@ -143,3 +143,42 @@ def test_code_hash_identifies_the_measured_code_by_content(tmp_path):
     assert harness.code_hash(str(copy / "__init__.py")) == original
     (copy / "runner.py").write_bytes((copy / "runner.py").read_bytes() + b"\n# changed\n")
     assert harness.code_hash(str(copy / "__init__.py")) != original
+
+
+def test_probe_handles_a_missing_input_and_a_directory_like_the_validators_do(tmp_path):
+    assert _cli("generate", "--out", tmp_path, "--rows", "50").returncode == 0
+    source = tmp_path / "data_50" / "source.csv"
+    for target in (tmp_path / "data_50" / "nope.csv", tmp_path / "data_50"):
+        proc = _cli("probe", "--source", source, "--target", target, "--checks", "structural_validation")
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["status"] == "failed"  # a file_access issue, not a probe error
+
+
+def test_a_later_probe_restores_the_real_functions(tmp_path):
+    import builtins
+    import io
+    import pathlib
+
+    harness = _load_harness()
+    path = tmp_path / "data.csv"
+    path.write_bytes(b"id\n1\n")
+    originals = (io.open, builtins.open, pathlib.Path.open)
+
+    with harness.IoProbe([path]):
+        second = harness.IoProbe([path])  # created while another probe is active
+    with second:
+        pass
+
+    assert (io.open, builtins.open, pathlib.Path.open) == originals
+
+
+def test_byte_counting_never_changes_what_the_code_under_test_does(tmp_path):
+    harness = _load_harness()
+    path = tmp_path / "data.csv"
+    path.write_bytes(b"id\n1\xff\n")
+
+    with harness.IoProbe([path]) as probe:
+        text = open(path, encoding="utf-8", errors="surrogateescape").read()
+
+    assert text == "id\n1\udcff\n"
+    assert probe.stats[next(iter(probe.stats))]["bytes_read"] == len(b"id\n1\xff\n")

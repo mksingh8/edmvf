@@ -12,8 +12,9 @@ the pytest process), and reports for each input path:
 * size       - the file size on disk.
 
 One sequential pass means opens == 1, seeks == 0 and bytes_read == size.
-The probe sees `open`, `io.open`, `pathlib` and the audit event; it does not see
-`os.open` or memory maps (see benchmarks/README.md).
+The probe sees `open`, `io.open`, `pathlib.Path.open` and the audit `open` event
+(so `os.open` opens are counted, though not their reads or seeks); it does not see
+memory maps (see benchmarks/README.md).
 """
 
 import json

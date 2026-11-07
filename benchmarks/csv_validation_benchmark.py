@@ -128,7 +128,7 @@ class _CountingFile:
         self._raw, self._stats = raw, stats
 
     def _count(self, data):
-        self._stats["bytes_read"] += len(data) if isinstance(data, (bytes, bytearray)) else len(data.encode("utf-8"))
+        self._stats["bytes_read"] += len(data) if isinstance(data, (bytes, bytearray)) else len(data.encode("utf-8", "surrogateescape"))
         return data
 
     def seek(self, *a, **k):
@@ -194,10 +194,13 @@ class IoProbe:
     """Counts opens (audit hook) plus seeks and bytes read (open() proxy) per watched path."""
 
     def __init__(self, paths):
-        self.stats = {self._key(p): {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(p)} for p in paths}
+        # size is 0 for a path that is not a regular file (missing, a directory): there is no
+        # byte count to check it against, so it can never make the probe call itself blind.
+        self.stats = {
+            self._key(p): {"opens": 0, "seeks": 0, "bytes_read": 0, "size": os.path.getsize(p) if os.path.isfile(p) else 0}
+            for p in paths
+        }
         self.active = False
-        self._real_open = io.open
-        self._real_path_open = pathlib.Path.open
 
     @staticmethod
     def _key(path):
@@ -228,6 +231,8 @@ class IoProbe:
         return handle
 
     def __enter__(self):
+        self._real_open = io.open
+        self._real_path_open = pathlib.Path.open
         if not getattr(sys, "_edmvf_audit_installed", False):
             sys.addaudithook(_audit_dispatch)  # audit hooks cannot be removed; one per process
             sys._edmvf_audit_installed = True
